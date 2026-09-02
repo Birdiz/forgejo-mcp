@@ -144,8 +144,11 @@ async function runHttp(): Promise<void> {
   app.delete("/mcp", methodNotAllowed);
 
   const port = Number.parseInt(process.env.PORT ?? "3000", 10);
-  app.listen(port, () => {
-    console.error(`[${SERVER_NAME}] prêt en http sur :${port}/mcp → ${instanceUrl}`);
+  // Se lier explicitement à 0.0.0.0 : les plateformes conteneurisées (Railway,
+  // Fly, Cloud Run) routent vers cette interface. Laisser Node choisir peut
+  // aboutir à une écoute sur :: seule, et la plateforme ne répond alors jamais.
+  app.listen(port, "0.0.0.0", () => {
+    console.error(`[${SERVER_NAME}] prêt en http sur 0.0.0.0:${port}/mcp → ${instanceUrl}`);
   });
 }
 

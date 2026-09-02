@@ -102,6 +102,12 @@ Variables à définir sur le service (`railway variables --set ...` ou l'interfa
 | `TRANSPORT` | `http` |
 | `FORGEJO_DEFAULT_OWNER` | facultatif, évite de répéter `owner` à chaque appel |
 | `FORGEJO_DEFAULT_REPO` | facultatif, évite de répéter `repo` à chaque appel |
+| `PORT` | `3000` — et saisir **le même** comme target port du domaine |
+
+Railway exige que le target port du domaine soit exactement celui sur lequel le
+service écoute, sinon la plateforme renvoie « Application failed to respond ».
+Le serveur écoute sur `0.0.0.0:$PORT` : fixer `PORT` explicitement et reprendre
+la même valeur pour le domaine supprime toute ambiguïté.
 
 **Ne jamais définir `FORGEJO_TOKEN`** sur le service : le serveur refuse de
 démarrer, précisément pour empêcher cette erreur.
