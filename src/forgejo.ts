@@ -119,6 +119,11 @@ export class ForgejoClient {
     const response = await this.#request(path, { method: "POST", body });
     return (await response.json()) as T;
   }
+
+  async patch<T>(path: string, body: unknown): Promise<T> {
+    const response = await this.#request(path, { method: "PATCH", body });
+    return (await response.json()) as T;
+  }
 }
 
 /**

@@ -98,6 +98,15 @@ const writeCreate = {
   openWorldHint: true,
 } as const;
 
+// Updating overwrites fields that already hold content, hence destructiveHint.
+// Applying the same patch twice lands on the same state, hence idempotent.
+const writeUpdate = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: true,
+  openWorldHint: true,
+} as const;
+
 // --- Shared helpers --------------------------------------------------------
 
 /** Runs a handler, converting any failure into an actionable response. */
@@ -493,6 +502,103 @@ Write operation: requires the 'write:issue' scope. The comment is attributed to 
             html_url: comment.html_url,
           },
           markdown: `Comment posted on #${params.number} by ${comment.user?.login ?? "?"}\n\n${comment.html_url}`,
+        });
+      }),
+  );
+
+  server.registerTool(
+    "forgejo_update_issue",
+    {
+      title: "Update an issue",
+      description: `Changes an existing issue: state, title, body, labels or assignees. Write operation: requires the 'write:issue' scope.
+
+Parameters:
+  - owner, repo (optional when defaults are configured)
+  - number (required)
+  - state ('open' | 'closed', optional): closes or reopens the issue
+  - title (string, optional): replaces the current title
+  - body (string, optional): replaces the current body — this overwrites, it does not append
+  - labels (string[], optional): replaces the full label set; unknown names are skipped and reported
+  - assignees (string[], optional): replaces the full assignee list
+
+At least one changing field is required; omitted fields are left untouched.
+
+Returns: { number, title, state, labels, assignees, html_url, unresolved_labels }
+
+Examples:
+  - "close issue 42" -> number=42, state='closed'
+  - "reopen it and retitle it" -> number=42, state='open', title='…'
+
+To add to a discussion without altering the issue, use forgejo_comment_issue instead.
+Also accepts a pull request number, but only its issue-side fields change — it cannot merge or close a PR's branch.`,
+      inputSchema: {
+        ...repoShape,
+        number: z.number().int().min(1).describe("Issue number as displayed (#42 -> 42)."),
+        state: z
+          .enum(["open", "closed"])
+          .optional()
+          .describe("New state: 'closed' closes the issue, 'open' reopens it."),
+        title: z.string().min(1).max(255).optional().describe("Replacement title."),
+        body: z.string().max(65_535).optional().describe("Replacement body (overwrites, no append)."),
+        labels: z.array(z.string()).optional().describe("Replacement label set, by name."),
+        assignees: z.array(z.string()).optional().describe("Replacement assignee list, by login."),
+        ...formatShape,
+      },
+      annotations: writeUpdate,
+    },
+    async (params: {
+      owner?: string;
+      repo?: string;
+      number: number;
+      state?: "open" | "closed";
+      title?: string;
+      body?: string;
+      labels?: string[];
+      assignees?: string[];
+      response_format: ResponseFormat;
+    }) =>
+      run(async () => {
+        const { slug } = resolveRepo(params, defaults);
+
+        const patch: Record<string, unknown> = {};
+        if (params.state !== undefined) patch.state = params.state;
+        if (params.title !== undefined) patch.title = params.title;
+        if (params.body !== undefined) patch.body = params.body;
+        if (params.assignees !== undefined) patch.assignees = params.assignees;
+
+        let unresolved: string[] = [];
+        if (params.labels !== undefined) {
+          const resolved = await resolveLabelIds(client, slug, params.labels);
+          unresolved = resolved.unresolved;
+          patch.labels = resolved.ids;
+        }
+
+        if (Object.keys(patch).length === 0) {
+          throw new UsageError(
+            "Error: nothing to update. Provide at least one of: state, title, body, labels, assignees.",
+          );
+        }
+
+        const issue = await client.patch<ForgejoIssue>(
+          `/repos/${slug}/issues/${params.number}`,
+          patch,
+        );
+        const warning =
+          unresolved.length > 0
+            ? `\n\n⚠️ Unknown labels, skipped: ${unresolved.join(", ")}.`
+            : "";
+        return singleResult({
+          format: params.response_format,
+          structured: {
+            number: issue.number,
+            title: issue.title,
+            state: issue.state,
+            labels: labelNames(issue),
+            assignees: (issue.assignees ?? []).map((user) => user.login),
+            html_url: issue.html_url,
+            unresolved_labels: unresolved,
+          },
+          markdown: `Issue **#${issue.number}** updated — state: ${issue.state}, title: ${issue.title}\n\n${issue.html_url}${warning}`,
         });
       }),
   );

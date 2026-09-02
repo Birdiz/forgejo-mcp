@@ -58,6 +58,7 @@ An existing token cannot be widened: adding a scope means issuing a new one.
 | `forgejo_get_issue` | read | full issue + comments |
 | `forgejo_create_issue` | **write** | open an issue (labels by name) |
 | `forgejo_comment_issue` | **write** | comment on an issue or a PR |
+| `forgejo_update_issue` | **write** | close, reopen, retitle, rewrite, relabel, reassign |
 | `forgejo_list_pull_requests` | read | pull requests by state |
 | `forgejo_get_pull_request` | read | full PR, optional diff |
 | `forgejo_create_pull_request` | **write** | open a PR between two branches |
@@ -131,9 +132,12 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocol
 
 ## Known limitations
 
-- No PR merging, no reviews, no label or milestone management: the scope stops
-  at reading, opening and commenting.
-- `forgejo_create_issue` only applies **existing** labels; unknown names are
-  skipped and reported in the response.
+- No PR merging, no reviews, no milestone management: the scope stops at
+  reading, opening, updating and commenting.
+- `forgejo_update_issue` **replaces** the fields it is given — body, labels and
+  assignees are overwritten, not appended to. Read the issue first if you mean
+  to preserve what is there.
+- `forgejo_create_issue` and `forgejo_update_issue` only apply **existing**
+  labels; unknown names are skipped and reported in the response.
 - Binary files are not decoded (size and SHA only).
 - Pagination is capped at 50 items per page, the Forgejo API limit.
