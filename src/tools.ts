@@ -641,7 +641,7 @@ Parameters:
 Returns: { number, title, state, head, base, html_url }
 
 Prerequisite: the 'head' branch must exist server-side — push before calling.
-Errors: 409 if a PR is already open for this branch pair; 422 if a branch does not exist or head equals base.`,
+Errors: 409 if a PR is already open for this branch pair; 404 if the head or base branch does not exist; 422 if the request is otherwise rejected.`,
       inputSchema: {
         ...repoShape,
         head: z.string().min(1).describe("Source branch, pushed to the server."),

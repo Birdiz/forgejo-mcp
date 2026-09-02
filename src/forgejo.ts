@@ -142,7 +142,7 @@ export function describeError(error: unknown): string {
         return `Error: forbidden (403). Missing token scope: ${scope}. Adjust it at /user/settings/applications — an existing token cannot be widened, a new one is required.${suffix}`;
       }
       case 404:
-        return `Error: not found (404). Check owner/repo and the number. A private repository the token cannot reach also answers 404.${suffix}`;
+        return `Error: not found (404). Check owner/repo, and the number or branch name. A private repository the token cannot reach also answers 404.${suffix}`;
       case 409:
         return `Error: conflict (409). Typically a pull request already open for this branch pair, or identical branches.${suffix}`;
       case 422:
