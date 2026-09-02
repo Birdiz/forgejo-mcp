@@ -1,7 +1,7 @@
-// Déclaration des outils MCP.
+// MCP tool declarations.
 //
-// Le client Forgejo est injecté : en stdio il porte le token d'environnement,
-// en HTTP celui de la requête en cours. Aucun outil ne connaît sa provenance.
+// The Forgejo client is injected: in stdio it carries the environment token, in
+// HTTP the one from the current request. No tool knows where it came from.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -43,7 +43,7 @@ import type {
   ForgejoUser,
 } from "./types.js";
 
-/** Erreur d'usage : message rendu tel quel à l'agent, sans passer par describeError. */
+/** Usage error: surfaced verbatim to the agent, bypassing describeError. */
 class UsageError extends Error {}
 
 export interface RepoDefaults {
@@ -51,37 +51,37 @@ export interface RepoDefaults {
   repo?: string;
 }
 
-// --- Fragments de schéma réutilisés ---------------------------------------
+// --- Reused schema fragments ----------------------------------------------
 
 const repoShape = {
   owner: z
     .string()
     .min(1)
     .optional()
-    .describe("Propriétaire du dépôt (utilisateur ou organisation). Par défaut : FORGEJO_DEFAULT_OWNER."),
+    .describe("Repository owner (user or organisation). Defaults to FORGEJO_DEFAULT_OWNER."),
   repo: z
     .string()
     .min(1)
     .optional()
-    .describe("Nom du dépôt. Par défaut : FORGEJO_DEFAULT_REPO."),
+    .describe("Repository name. Defaults to FORGEJO_DEFAULT_REPO."),
 };
 
 const paginationShape = {
-  page: z.number().int().min(1).default(1).describe("Page à récupérer, 1 = première."),
+  page: z.number().int().min(1).default(1).describe("Page to fetch, 1 = first."),
   limit: z
     .number()
     .int()
     .min(1)
     .max(MAX_PAGE_SIZE)
     .default(DEFAULT_PAGE_SIZE)
-    .describe(`Nombre d'éléments par page (max ${MAX_PAGE_SIZE}).`),
+    .describe(`Items per page (max ${MAX_PAGE_SIZE}).`),
 };
 
 const formatShape = {
   response_format: z
     .enum(RESPONSE_FORMATS)
     .default("markdown")
-    .describe("'markdown' pour un rendu lisible, 'json' pour la donnée complète."),
+    .describe("'markdown' for a readable rendering, 'json' for the full data."),
 };
 
 const readOnly = {
@@ -98,9 +98,9 @@ const writeCreate = {
   openWorldHint: true,
 } as const;
 
-// --- Utilitaires partagés --------------------------------------------------
+// --- Shared helpers --------------------------------------------------------
 
-/** Exécute un handler en convertissant toute erreur en réponse actionnable. */
+/** Runs a handler, converting any failure into an actionable response. */
 async function run(handler: () => Promise<ToolResult>): Promise<ToolResult> {
   try {
     return await handler();
@@ -110,7 +110,7 @@ async function run(handler: () => Promise<ToolResult>): Promise<ToolResult> {
   }
 }
 
-/** Résout owner/repo depuis les paramètres puis les défauts d'environnement. */
+/** Resolves owner/repo from the call parameters, then the environment defaults. */
 function resolveRepo(
   params: { owner?: string; repo?: string },
   defaults: RepoDefaults,
@@ -119,13 +119,13 @@ function resolveRepo(
   const repo = params.repo ?? defaults.repo;
   if (!owner || !repo) {
     throw new UsageError(
-      "Erreur : dépôt non déterminé. Fournir 'owner' et 'repo' dans l'appel, ou définir FORGEJO_DEFAULT_OWNER et FORGEJO_DEFAULT_REPO côté serveur.",
+      "Error: repository not determined. Pass 'owner' and 'repo' in the call, or set FORGEJO_DEFAULT_OWNER and FORGEJO_DEFAULT_REPO server-side.",
     );
   }
   return { owner, repo, slug: encodePath(owner, repo) };
 }
 
-/** Traduit des noms d'étiquettes en identifiants, seuls acceptés par l'API. */
+/** Translates label names into the identifiers the API expects. */
 async function resolveLabelIds(
   client: ForgejoClient,
   slug: string,
@@ -150,20 +150,20 @@ export function registerTools(
   client: ForgejoClient,
   defaults: RepoDefaults,
 ): void {
-  // --- Identité ------------------------------------------------------------
+  // --- Identity ------------------------------------------------------------
 
   server.registerTool(
     "forgejo_whoami",
     {
-      title: "Identité du token Forgejo",
-      description: `Renvoie le compte Forgejo auquel appartient le token utilisé pour cet appel.
+      title: "Forgejo token identity",
+      description: `Returns the Forgejo account the token used for this call belongs to.
 
-Aucun paramètre.
+No parameters.
 
-Retourne : { id, login, full_name, email }
+Returns: { id, login, full_name, email }
 
-À utiliser pour : vérifier qu'un token est valide et sous quelle identité les écritures seront attribuées, avant de créer une issue ou une pull request.
-Erreurs : 401 si le token est absent, expiré ou révoqué.`,
+Use it to confirm a token is valid and which identity writes will be attributed to, before creating an issue or a pull request.
+Errors: 401 if the token is missing, expired or revoked; 403 if it lacks the 'read:user' scope.`,
       inputSchema: { ...formatShape },
       annotations: readOnly,
     },
@@ -179,7 +179,7 @@ Erreurs : 401 si le token est absent, expiré ou révoqué.`,
         return singleResult({
           format: response_format,
           structured,
-          markdown: `# ${user.login}\n\n- **Nom** : ${user.full_name || "*(non renseigné)*"}\n- **Courriel** : ${user.email || "*(masqué)*"}\n- **ID** : ${user.id}`,
+          markdown: `# ${user.login}\n\n- **Name**: ${user.full_name || "*(not set)*"}\n- **Email**: ${user.email || "*(hidden)*"}\n- **ID**: ${user.id}`,
         });
       }),
   );
@@ -187,14 +187,15 @@ Erreurs : 401 si le token est absent, expiré ou révoqué.`,
   server.registerTool(
     "forgejo_list_repos",
     {
-      title: "Lister les dépôts accessibles",
-      description: `Liste les dépôts auxquels le token donne accès, du plus récemment mis à jour au plus ancien.
+      title: "List accessible repositories",
+      description: `Lists the repositories the token can reach, most recently updated first.
 
-Paramètres : page, limit, response_format.
+Parameters: page, limit, response_format.
 
-Retourne : { total, count, page, limit, has_more, repos: [{ full_name, private, fork, default_branch, description, updated_at, html_url }] }
+Returns: { total, count, page, limit, has_more, repos: [{ full_name, private, fork, default_branch, description, updated_at, html_url }] }
 
-À utiliser pour : découvrir les valeurs owner/repo à passer aux autres outils quand elles ne sont pas connues.`,
+Use it to discover the owner/repo values to pass to the other tools when they are unknown.
+Errors: 403 if the token lacks the 'read:user' scope.`,
       inputSchema: { ...paginationShape, ...formatShape },
       annotations: readOnly,
     },
@@ -210,7 +211,7 @@ Retourne : { total, count, page, limit, has_more, repos: [{ full_name, private, 
       run(async () => {
         const { items, total } = await client.getList<ForgejoRepo>("/user/repos", { page, limit });
         if (items.length === 0) {
-          return errorResult("Aucun dépôt accessible avec ce token.");
+          return errorResult("No repository reachable with this token.");
         }
         return listResult({
           format: response_format,
@@ -230,7 +231,7 @@ Retourne : { total, count, page, limit, has_more, repos: [{ full_name, private, 
                 html_url: repo.html_url,
               })),
             },
-            markdown: [`# Dépôts accessibles (${total})`, "", ...shown.map(repoLine)].join("\n"),
+            markdown: [`# Accessible repositories (${total})`, "", ...shown.map(repoLine)].join("\n"),
           }),
         });
       }),
@@ -241,26 +242,26 @@ Retourne : { total, count, page, limit, has_more, repos: [{ full_name, private, 
   server.registerTool(
     "forgejo_list_issues",
     {
-      title: "Lister les issues",
-      description: `Liste les issues d'un dépôt. Les pull requests sont exclues (utiliser forgejo_list_pull_requests).
+      title: "List issues",
+      description: `Lists a repository's issues. Pull requests are excluded (use forgejo_list_pull_requests).
 
-Paramètres :
-  - owner, repo (string, optionnels si défauts configurés)
-  - state ('open' | 'closed' | 'all', défaut 'open')
-  - labels (string[], optionnel) : noms d'étiquettes, toutes exigées
-  - query (string, optionnel) : recherche plein texte dans titre et corps
+Parameters:
+  - owner, repo (string, optional when defaults are configured)
+  - state ('open' | 'closed' | 'all', default 'open')
+  - labels (string[], optional): label names, all of them required
+  - query (string, optional): full-text search across title and body
   - page, limit, response_format
 
-Retourne : { total, count, page, limit, has_more, issues: [{ number, title, state, author, labels, comments, created_at, updated_at, html_url }] }
+Returns: { total, count, page, limit, has_more, issues: [{ number, title, state, author, labels, comments, created_at, updated_at, html_url }] }
 
-Exemples :
-  - « les issues ouvertes sur le CRM » -> state='open'
-  - « les bugs fermés » -> state='closed', labels=['bug']`,
+Examples:
+  - "open issues on the CRM" -> state='open'
+  - "closed bugs" -> state='closed', labels=['bug']`,
       inputSchema: {
         ...repoShape,
-        state: z.enum(["open", "closed", "all"]).default("open").describe("Filtre d'état."),
-        labels: z.array(z.string()).optional().describe("Noms d'étiquettes exigées."),
-        query: z.string().optional().describe("Recherche plein texte dans le titre et le corps."),
+        state: z.enum(["open", "closed", "all"]).default("open").describe("State filter."),
+        labels: z.array(z.string()).optional().describe("Required label names."),
+        query: z.string().optional().describe("Full-text search across title and body."),
         ...paginationShape,
         ...formatShape,
       },
@@ -288,7 +289,7 @@ Exemples :
         });
         if (items.length === 0) {
           return errorResult(
-            `Aucune issue ne correspond (état '${params.state}'${params.labels ? `, étiquettes ${params.labels.join(", ")}` : ""}${params.query ? `, recherche « ${params.query} »` : ""}).`,
+            `No issue matches (state '${params.state}'${params.labels ? `, labels ${params.labels.join(", ")}` : ""}${params.query ? `, search "${params.query}"` : ""}).`,
           );
         }
         return listResult({
@@ -320,22 +321,22 @@ Exemples :
   server.registerTool(
     "forgejo_get_issue",
     {
-      title: "Détail d'une issue",
-      description: `Renvoie une issue complète : description, métadonnées et, si demandé, ses commentaires.
+      title: "Issue detail",
+      description: `Returns a full issue: description, metadata and, on request, its comments.
 
-Paramètres : owner, repo, number (obligatoire), include_comments (bool, défaut true), response_format.
+Parameters: owner, repo, number (required), include_comments (bool, default true), response_format.
 
-Retourne : { number, title, state, author, labels, assignees, body, html_url, comments: [{ author, body, created_at }] }
+Returns: { number, title, state, author, labels, assignees, body, html_url, comments: [{ author, body, created_at }] }
 
-Fonctionne aussi avec un numéro de pull request : issues et PR partagent la même numérotation dans Forgejo.
-Erreurs : 404 si le numéro n'existe pas dans ce dépôt.`,
+Also works with a pull request number: issues and PRs share one numbering space in Forgejo.
+Errors: 404 if the number does not exist in this repository.`,
       inputSchema: {
         ...repoShape,
-        number: z.number().int().min(1).describe("Numéro de l'issue, tel qu'affiché (#42 -> 42)."),
+        number: z.number().int().min(1).describe("Issue number as displayed (#42 -> 42)."),
         include_comments: z
           .boolean()
           .default(true)
-          .describe("Récupérer aussi le fil de commentaires."),
+          .describe("Also fetch the comment thread."),
         ...formatShape,
       },
       annotations: readOnly,
@@ -386,25 +387,25 @@ Erreurs : 404 si le numéro n'existe pas dans ce dépôt.`,
   server.registerTool(
     "forgejo_create_issue",
     {
-      title: "Créer une issue",
-      description: `Ouvre une nouvelle issue. Écriture : requiert le scope 'write:issue'.
+      title: "Create an issue",
+      description: `Opens a new issue. Write operation: requires the 'write:issue' scope.
 
-Paramètres :
-  - owner, repo (optionnels si défauts configurés)
-  - title (string, obligatoire)
-  - body (string, optionnel) : description en markdown
-  - labels (string[], optionnel) : noms d'étiquettes ; les noms inconnus sont ignorés et signalés
-  - assignees (string[], optionnel) : identifiants de connexion
+Parameters:
+  - owner, repo (optional when defaults are configured)
+  - title (string, required)
+  - body (string, optional): markdown description
+  - labels (string[], optional): label names; unknown names are skipped and reported
+  - assignees (string[], optional): login names
 
-Retourne : { number, title, state, html_url, unresolved_labels }
+Returns: { number, title, state, html_url, unresolved_labels }
 
-L'issue est attribuée au compte propriétaire du token — vérifier avec forgejo_whoami en cas de doute.`,
+The issue is attributed to the token's owner — check with forgejo_whoami if unsure.`,
       inputSchema: {
         ...repoShape,
-        title: z.string().min(1).max(255).describe("Titre de l'issue."),
-        body: z.string().max(65_535).optional().describe("Description en markdown."),
-        labels: z.array(z.string()).optional().describe("Noms d'étiquettes à poser."),
-        assignees: z.array(z.string()).optional().describe("Logins à assigner."),
+        title: z.string().min(1).max(255).describe("Issue title."),
+        body: z.string().max(65_535).optional().describe("Markdown description."),
+        labels: z.array(z.string()).optional().describe("Label names to apply."),
+        assignees: z.array(z.string()).optional().describe("Logins to assign."),
         ...formatShape,
       },
       annotations: writeCreate,
@@ -435,7 +436,7 @@ L'issue est attribuée au compte propriétaire du token — vérifier avec forge
         });
         const warning =
           unresolved.length > 0
-            ? `\n\n⚠️ Étiquettes inconnues, ignorées : ${unresolved.join(", ")}. Les créer dans le dépôt puis les reposer si besoin.`
+            ? `\n\n⚠️ Unknown labels, skipped: ${unresolved.join(", ")}. Create them in the repository, then apply them again if needed.`
             : "";
         return singleResult({
           format: params.response_format,
@@ -446,7 +447,7 @@ L'issue est attribuée au compte propriétaire du token — vérifier avec forge
             html_url: issue.html_url,
             unresolved_labels: unresolved,
           },
-          markdown: `Issue **#${issue.number}** créée : ${issue.title}\n\n${issue.html_url}${warning}`,
+          markdown: `Issue **#${issue.number}** created: ${issue.title}\n\n${issue.html_url}${warning}`,
         });
       }),
   );
@@ -454,18 +455,18 @@ L'issue est attribuée au compte propriétaire du token — vérifier avec forge
   server.registerTool(
     "forgejo_comment_issue",
     {
-      title: "Commenter une issue ou une PR",
-      description: `Ajoute un commentaire sur une issue ou une pull request (numérotation commune).
+      title: "Comment on an issue or PR",
+      description: `Adds a comment to an issue or a pull request (shared numbering).
 
-Paramètres : owner, repo, number (obligatoire), body (string, obligatoire), response_format.
+Parameters: owner, repo, number (required), body (string, required), response_format.
 
-Retourne : { id, author, created_at, html_url }
+Returns: { id, author, created_at, html_url }
 
-Écriture : requiert le scope 'write:issue'. Le commentaire est attribué au propriétaire du token et ne peut pas être supprimé par cet outil.`,
+Write operation: requires the 'write:issue' scope. The comment is attributed to the token's owner and cannot be deleted by this tool.`,
       inputSchema: {
         ...repoShape,
-        number: z.number().int().min(1).describe("Numéro de l'issue ou de la pull request."),
-        body: z.string().min(1).max(65_535).describe("Contenu du commentaire, en markdown."),
+        number: z.number().int().min(1).describe("Issue or pull request number."),
+        body: z.string().min(1).max(65_535).describe("Comment body, in markdown."),
         ...formatShape,
       },
       annotations: writeCreate,
@@ -491,7 +492,7 @@ Retourne : { id, author, created_at, html_url }
             created_at: comment.created_at,
             html_url: comment.html_url,
           },
-          markdown: `Commentaire publié sur #${params.number} par ${comment.user?.login ?? "?"}\n\n${comment.html_url}`,
+          markdown: `Comment posted on #${params.number} by ${comment.user?.login ?? "?"}\n\n${comment.html_url}`,
         });
       }),
   );
@@ -501,17 +502,17 @@ Retourne : { id, author, created_at, html_url }
   server.registerTool(
     "forgejo_list_pull_requests",
     {
-      title: "Lister les pull requests",
-      description: `Liste les pull requests d'un dépôt.
+      title: "List pull requests",
+      description: `Lists a repository's pull requests.
 
-Paramètres : owner, repo, state ('open' | 'closed' | 'all', défaut 'open'), page, limit, response_format.
+Parameters: owner, repo, state ('open' | 'closed' | 'all', default 'open'), page, limit, response_format.
 
-Retourne : { total, count, page, limit, has_more, pull_requests: [{ number, title, state, merged, draft, head, base, author, html_url }] }
+Returns: { total, count, page, limit, has_more, pull_requests: [{ number, title, state, merged, draft, head, base, author, html_url }] }
 
-Note : une PR fermée sans fusion et une PR fusionnée ont toutes deux state='closed' — se fier au champ 'merged'.`,
+Note: a PR closed without merging and a merged PR both report state='closed' — rely on the 'merged' field.`,
       inputSchema: {
         ...repoShape,
-        state: z.enum(["open", "closed", "all"]).default("open").describe("Filtre d'état."),
+        state: z.enum(["open", "closed", "all"]).default("open").describe("State filter."),
         ...paginationShape,
         ...formatShape,
       },
@@ -533,7 +534,7 @@ Note : une PR fermée sans fusion et une PR fusionnée ont toutes deux state='cl
           limit: params.limit,
         });
         if (items.length === 0) {
-          return errorResult(`Aucune pull request avec l'état '${params.state}'.`);
+          return errorResult(`No pull request with state '${params.state}'.`);
         }
         return listResult({
           format: params.response_format,
@@ -564,19 +565,19 @@ Note : une PR fermée sans fusion et une PR fusionnée ont toutes deux state='cl
   server.registerTool(
     "forgejo_get_pull_request",
     {
-      title: "Détail d'une pull request",
-      description: `Renvoie une pull request : description, état de fusion, statistiques et, si demandé, le diff unifié.
+      title: "Pull request detail",
+      description: `Returns a pull request: description, merge state, statistics and, on request, the unified diff.
 
-Paramètres : owner, repo, number (obligatoire), include_diff (bool, défaut false), response_format.
+Parameters: owner, repo, number (required), include_diff (bool, default false), response_format.
 
-Retourne : { number, title, state, merged, mergeable, head, base, additions, deletions, changed_files, body, html_url, diff? }
+Returns: { number, title, state, merged, mergeable, head, base, additions, deletions, changed_files, body, html_url, diff? }
 
-Le diff est tronqué au-delà de la limite de contexte : la coupe est explicitement signalée dans le texte renvoyé.
-Astuce : laisser include_diff=false pour un simple état des lieux, il économise beaucoup de contexte.`,
+The diff is truncated past the context limit and the cut is explicitly reported in the returned text.
+Tip: leave include_diff=false for a status check — it saves a lot of context.`,
       inputSchema: {
         ...repoShape,
-        number: z.number().int().min(1).describe("Numéro de la pull request."),
-        include_diff: z.boolean().default(false).describe("Joindre le diff unifié (volumineux)."),
+        number: z.number().int().min(1).describe("Pull request number."),
+        include_diff: z.boolean().default(false).describe("Attach the unified diff (large)."),
         ...formatShape,
       },
       annotations: readOnly,
@@ -595,7 +596,7 @@ Astuce : laisser include_diff=false pour un simple état des lieux, il économis
         let diffTruncated = false;
         if (params.include_diff) {
           const raw = await client.getText(`/repos/${slug}/pulls/${params.number}.diff`);
-          // On garde de la marge pour la description et les métadonnées.
+          // Leave headroom for the description and metadata.
           const bounded = truncateBlob(raw, Math.floor(CHARACTER_LIMIT * 0.7));
           diff = bounded.text;
           diffTruncated = bounded.truncated;
@@ -627,26 +628,26 @@ Astuce : laisser include_diff=false pour un simple état des lieux, il économis
   server.registerTool(
     "forgejo_create_pull_request",
     {
-      title: "Ouvrir une pull request",
-      description: `Ouvre une pull request entre deux branches du dépôt. Écriture : requiert le scope 'write:repository'.
+      title: "Open a pull request",
+      description: `Opens a pull request between two branches of the repository. Write operation: requires the 'write:repository' scope.
 
-Paramètres :
-  - owner, repo (optionnels si défauts configurés)
-  - head (string, obligatoire) : branche source, déjà poussée sur le serveur
-  - base (string, obligatoire) : branche cible, typiquement 'main'
-  - title (string, obligatoire)
-  - body (string, optionnel)
+Parameters:
+  - owner, repo (optional when defaults are configured)
+  - head (string, required): source branch, already pushed to the server
+  - base (string, required): target branch, typically 'main'
+  - title (string, required)
+  - body (string, optional)
 
-Retourne : { number, title, state, head, base, html_url }
+Returns: { number, title, state, head, base, html_url }
 
-Prérequis : la branche 'head' doit exister côté serveur — pousser avant d'appeler.
-Erreurs : 409 si une PR est déjà ouverte pour ce couple de branches ; 422 si une branche n'existe pas ou si head et base sont identiques.`,
+Prerequisite: the 'head' branch must exist server-side — push before calling.
+Errors: 409 if a PR is already open for this branch pair; 422 if a branch does not exist or head equals base.`,
       inputSchema: {
         ...repoShape,
-        head: z.string().min(1).describe("Branche source, poussée sur le serveur."),
-        base: z.string().min(1).describe("Branche cible, par exemple 'main'."),
-        title: z.string().min(1).max(255).describe("Titre de la pull request."),
-        body: z.string().max(65_535).optional().describe("Description en markdown."),
+        head: z.string().min(1).describe("Source branch, pushed to the server."),
+        base: z.string().min(1).describe("Target branch, for example 'main'."),
+        title: z.string().min(1).max(255).describe("Pull request title."),
+        body: z.string().max(65_535).optional().describe("Markdown description."),
         ...formatShape,
       },
       annotations: writeCreate,
@@ -664,7 +665,7 @@ Erreurs : 409 si une PR est déjà ouverte pour ce couple de branches ; 422 si u
         const { slug } = resolveRepo(params, defaults);
         if (params.head === params.base) {
           throw new UsageError(
-            "Erreur : 'head' et 'base' sont identiques. Une pull request compare deux branches différentes.",
+            "Error: 'head' and 'base' are identical. A pull request compares two different branches.",
           );
         }
         const pull = await client.post<ForgejoPullRequest>(`/repos/${slug}/pulls`, {
@@ -683,24 +684,24 @@ Erreurs : 409 si une PR est déjà ouverte pour ce couple de branches ; 422 si u
             base: pull.base?.ref ?? params.base,
             html_url: pull.html_url,
           },
-          markdown: `Pull request **#${pull.number}** ouverte : ${pull.title}\n\n${params.head} → ${params.base}\n\n${pull.html_url}`,
+          markdown: `Pull request **#${pull.number}** opened: ${pull.title}\n\n${params.head} → ${params.base}\n\n${pull.html_url}`,
         });
       }),
   );
 
-  // --- Lecture du dépôt ----------------------------------------------------
+  // --- Repository reads ----------------------------------------------------
 
   server.registerTool(
     "forgejo_list_branches",
     {
-      title: "Lister les branches",
-      description: `Liste les branches du dépôt avec leur dernier commit et leur éventuelle protection.
+      title: "List branches",
+      description: `Lists the repository's branches with their latest commit and protection status.
 
-Paramètres : owner, repo, page, limit, response_format.
+Parameters: owner, repo, page, limit, response_format.
 
-Retourne : { total, count, page, limit, has_more, branches: [{ name, protected, commit_sha, commit_message }] }
+Returns: { total, count, page, limit, has_more, branches: [{ name, protected, commit_sha, commit_message }] }
 
-À utiliser pour : vérifier qu'une branche existe avant d'ouvrir une pull request avec forgejo_create_pull_request.`,
+Use it to confirm a branch exists before opening a pull request with forgejo_create_pull_request.`,
       inputSchema: { ...repoShape, ...paginationShape, ...formatShape },
       annotations: readOnly,
     },
@@ -741,19 +742,19 @@ Retourne : { total, count, page, limit, has_more, branches: [{ name, protected, 
   server.registerTool(
     "forgejo_list_commits",
     {
-      title: "Lister les commits",
-      description: `Liste les commits d'une branche, du plus récent au plus ancien.
+      title: "List commits",
+      description: `Lists a branch's commits, newest first.
 
-Paramètres : owner, repo, branch (string, optionnel — branche par défaut du dépôt si omis), page, limit, response_format.
+Parameters: owner, repo, branch (string, optional — the repository's default branch when omitted), page, limit, response_format.
 
-Retourne : { total, count, page, limit, has_more, commits: [{ sha, message, author, date, html_url }] }
+Returns: { total, count, page, limit, has_more, commits: [{ sha, message, author, date, html_url }] }
 
-Exemples :
-  - « qu'est-ce qui a changé récemment » -> limit=10
-  - « l'historique de la branche de migration » -> branch='birdiz/migration'`,
+Examples:
+  - "what changed recently" -> limit=10
+  - "history of the migration branch" -> branch='birdiz/migration'`,
       inputSchema: {
         ...repoShape,
-        branch: z.string().optional().describe("Branche ou SHA de départ. Défaut : branche principale."),
+        branch: z.string().optional().describe("Branch or starting SHA. Defaults to the main branch."),
         ...paginationShape,
         ...formatShape,
       },
@@ -803,24 +804,24 @@ Exemples :
   server.registerTool(
     "forgejo_get_file",
     {
-      title: "Lire un fichier ou un dossier",
-      description: `Lit le contenu d'un fichier texte, ou liste un dossier, à une révision donnée.
+      title: "Read a file or directory",
+      description: `Reads a text file's contents, or lists a directory, at a given revision.
 
-Paramètres :
-  - owner, repo (optionnels si défauts configurés)
-  - path (string, obligatoire) : chemin depuis la racine, par exemple 'lib/filters.ts' ; '' ou '.' pour la racine
-  - ref (string, optionnel) : branche, tag ou SHA. Défaut : branche principale
+Parameters:
+  - owner, repo (optional when defaults are configured)
+  - path (string, required): path from the repository root, e.g. 'lib/filters.ts'; '' or '.' for the root
+  - ref (string, optional): branch, tag or SHA. Defaults to the main branch
   - response_format
 
-Retourne, pour un fichier : { type: 'file', path, size, sha, content, truncated, html_url }
-Retourne, pour un dossier : { type: 'directory', path, entries: [{ name, type, size }] }
+Returns, for a file: { type: 'file', path, size, sha, content, truncated, html_url }
+Returns, for a directory: { type: 'directory', path, entries: [{ name, type, size }] }
 
-Les fichiers binaires ne sont pas décodés : leur taille et leur SHA sont renvoyés avec une mention explicite.
-Le contenu est tronqué au-delà de la limite de contexte, la coupe est signalée.`,
+Binary files are not decoded: their size and SHA are returned with an explicit note.
+Contents are truncated past the context limit and the cut is reported.`,
       inputSchema: {
         ...repoShape,
-        path: z.string().default("").describe("Chemin du fichier ou du dossier. Vide = racine."),
-        ref: z.string().optional().describe("Branche, tag ou SHA. Défaut : branche principale."),
+        path: z.string().default("").describe("File or directory path. Empty = root."),
+        ref: z.string().optional().describe("Branch, tag or SHA. Defaults to the main branch."),
         ...formatShape,
       },
       annotations: readOnly,
@@ -850,9 +851,9 @@ Le contenu est tronqué au-delà de la limite de contexte, la coupe est signalé
             format: params.response_format,
             structured: { type: "directory", path: cleaned || "/", entries },
             markdown: [
-              `# ${cleaned || "/"} (${entries.length} entrée(s))`,
+              `# ${cleaned || "/"} (${entries.length} entr${entries.length === 1 ? "y" : "ies"})`,
               "",
-              ...entries.map((e) => `- ${e.type === "dir" ? "📁" : "📄"} **${e.name}**${e.type === "dir" ? "" : ` — ${e.size} o`}`),
+              ...entries.map((e) => `- ${e.type === "dir" ? "📁" : "📄"} **${e.name}**${e.type === "dir" ? "" : ` — ${e.size} B`}`),
             ].join("\n"),
           });
         }
@@ -871,7 +872,7 @@ Le contenu est tronqué au-delà de la limite de contexte, la coupe est signalé
               content: null,
               html_url: response.html_url ?? null,
             },
-            markdown: `# ${response.path}\n\nFichier binaire (${response.size} octets), non décodé. SHA : ${response.sha}`,
+            markdown: `# ${response.path}\n\nBinary file (${response.size} bytes), not decoded. SHA: ${response.sha}`,
           });
         }
 
@@ -889,7 +890,7 @@ Le contenu est tronqué au-delà de la limite de contexte, la coupe est signalé
             truncated: bounded.truncated,
             html_url: response.html_url ?? null,
           },
-          markdown: `# ${response.path}\n\n${response.size} octets — SHA ${response.sha}\n\n\`\`\`\n${bounded.text}\n\`\`\``,
+          markdown: `# ${response.path}\n\n${response.size} bytes — SHA ${response.sha}\n\n\`\`\`\n${bounded.text}\n\`\`\``,
         });
       }),
   );

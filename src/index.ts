@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-// Point d'entrée du serveur MCP Forgejo.
+// Entry point of the Forgejo MCP server.
 //
-// Deux transports :
-//   - stdio : usage local, le token vient de FORGEJO_TOKEN.
-//   - http  : déploiement partagé (Railway), le token vient de l'en-tête
-//             Authorization de CHAQUE requête.
+// Two transports:
+//   - stdio: local use, the token comes from FORGEJO_TOKEN.
+//   - http:  shared deployment (Railway), the token comes from the
+//            Authorization header of EVERY request.
 //
-// Le serveur n'a jamais d'autorité propre en mode http : sans token d'appelant,
-// il ne peut rien faire. C'est ce qui rend une URL publique acceptable, et ce
-// qui préserve l'attribution des écritures à leur véritable auteur.
+// In http mode the server never holds authority of its own: with no caller
+// token it can do nothing. That is what makes a public URL acceptable, and what
+// keeps writes attributed to their actual author.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -19,7 +19,7 @@ import { SERVER_NAME, SERVER_VERSION } from "./constants.js";
 import { ForgejoClient } from "./forgejo.js";
 import { registerTools, type RepoDefaults } from "./tools.js";
 
-/** Coupe le process avec un message lisible plutôt qu'une pile d'appels. */
+/** Exits with a readable message rather than a stack trace. */
 function fatal(message: string): never {
   console.error(`[${SERVER_NAME}] ${message}`);
   process.exit(1);
@@ -28,16 +28,16 @@ function fatal(message: string): never {
 function readInstanceUrl(): string {
   const raw = process.env.FORGEJO_URL;
   if (!raw) {
-    fatal("FORGEJO_URL est obligatoire (ex. https://forgejo.example.org).");
+    fatal("FORGEJO_URL is required (e.g. https://forgejo.example.org).");
   }
   let parsed: URL;
   try {
     parsed = new URL(raw);
   } catch {
-    fatal(`FORGEJO_URL n'est pas une URL valide : ${raw}`);
+    fatal(`FORGEJO_URL is not a valid URL: ${raw}`);
   }
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    fatal("FORGEJO_URL doit être en http ou https.");
+    fatal("FORGEJO_URL must use http or https.");
   }
   return raw;
 }
@@ -48,14 +48,14 @@ const defaults: RepoDefaults = {
   repo: process.env.FORGEJO_DEFAULT_REPO || undefined,
 };
 
-/** Un serveur MCP par token : les outils ferment sur le client authentifié. */
+/** One MCP server per token: the tools close over the authenticated client. */
 function createServer(token: string): McpServer {
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
   registerTools(server, new ForgejoClient(instanceUrl, token), defaults);
   return server;
 }
 
-/** Extrait le token de l'en-tête, sans jamais le journaliser. */
+/** Extracts the token from the headers, never logging it. */
 function extractToken(req: Request): string | null {
   const authorization = req.get("authorization");
   if (authorization) {
@@ -74,20 +74,20 @@ async function runStdio(): Promise<void> {
   const token = process.env.FORGEJO_TOKEN;
   if (!token) {
     fatal(
-      "FORGEJO_TOKEN est obligatoire en mode stdio. En créer un sur " +
-        `${instanceUrl}/user/settings/applications (scopes : write:issue, write:repository).`,
+      "FORGEJO_TOKEN is required in stdio mode. Create one at " +
+        `${instanceUrl}/user/settings/applications (scopes: write:issue, write:repository).`,
     );
   }
   const server = createServer(token);
   await server.connect(new StdioServerTransport());
-  console.error(`[${SERVER_NAME}] prêt en stdio sur ${instanceUrl}`);
+  console.error(`[${SERVER_NAME}] ready on stdio against ${instanceUrl}`);
 }
 
 async function runHttp(): Promise<void> {
   if (process.env.FORGEJO_TOKEN) {
     fatal(
-      "FORGEJO_TOKEN ne doit PAS être défini en mode http : le token doit venir de " +
-        "chaque appelant, sinon tous les utilisateurs agiraient sous une seule identité.",
+      "FORGEJO_TOKEN must NOT be set in http mode: the token has to come from each " +
+        "caller, otherwise every user would act under a single identity.",
     );
   }
 
@@ -107,14 +107,14 @@ async function runHttp(): Promise<void> {
         res,
         401,
         -32001,
-        "Token Forgejo manquant. Envoyer un en-tête 'Authorization: Bearer <token>'. " +
-          "Chaque utilisateur fournit le sien : ce serveur n'en détient aucun.",
+        "Missing Forgejo token. Send an 'Authorization: Bearer <token>' header. " +
+          "Each user supplies their own: this server holds none.",
       );
       return;
     }
 
-    // Transport et serveur neufs à chaque requête : mode sans session, et
-    // surtout aucune fuite de token d'un appelant vers un autre.
+    // Fresh transport and server per request: stateless mode, and above all no
+    // token leaking from one caller to another.
     const server = createServer(token);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
@@ -129,26 +129,26 @@ async function runHttp(): Promise<void> {
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
     } catch (error) {
-      console.error(`[${SERVER_NAME}] échec du traitement MCP :`, error);
+      console.error(`[${SERVER_NAME}] MCP request failed:`, error);
       if (!res.headersSent) {
-        jsonRpcError(res, 500, -32603, "Erreur interne du serveur MCP.");
+        jsonRpcError(res, 500, -32603, "Internal MCP server error.");
       }
     }
   });
 
-  // Mode sans session : pas de flux SSE à ouvrir ni de session à fermer.
+  // Stateless mode: no SSE stream to open, no session to delete.
   const methodNotAllowed = (_req: Request, res: Response): void => {
-    jsonRpcError(res, 405, -32000, "Seul POST /mcp est accepté (mode sans session).");
+    jsonRpcError(res, 405, -32000, "Only POST /mcp is accepted (stateless mode).");
   };
   app.get("/mcp", methodNotAllowed);
   app.delete("/mcp", methodNotAllowed);
 
   const port = Number.parseInt(process.env.PORT ?? "3000", 10);
-  // Se lier explicitement à 0.0.0.0 : les plateformes conteneurisées (Railway,
-  // Fly, Cloud Run) routent vers cette interface. Laisser Node choisir peut
-  // aboutir à une écoute sur :: seule, et la plateforme ne répond alors jamais.
+  // Bind explicitly to 0.0.0.0: containerised platforms (Railway, Fly, Cloud
+  // Run) route to that interface. Letting Node choose can end up listening on
+  // :: only, and the platform then never gets a response.
   app.listen(port, "0.0.0.0", () => {
-    console.error(`[${SERVER_NAME}] prêt en http sur 0.0.0.0:${port}/mcp → ${instanceUrl}`);
+    console.error(`[${SERVER_NAME}] ready on http 0.0.0.0:${port}/mcp against ${instanceUrl}`);
   });
 }
 
@@ -156,6 +156,6 @@ const transport = (process.env.TRANSPORT ?? "stdio").toLowerCase();
 const start = transport === "http" ? runHttp : runStdio;
 
 start().catch((error: unknown) => {
-  console.error(`[${SERVER_NAME}] démarrage impossible :`, error);
+  console.error(`[${SERVER_NAME}] failed to start:`, error);
   process.exit(1);
 });

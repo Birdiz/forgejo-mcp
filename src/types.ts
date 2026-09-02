@@ -1,5 +1,5 @@
-// Sous-ensemble typé des entités de l'API Forgejo v1.
-// On ne déclare que les champs réellement consommés : le reste est ignoré.
+// Typed subset of the Forgejo v1 API entities.
+// Only the fields we actually consume are declared; the rest is ignored.
 
 export interface ForgejoUser {
   id: number;
@@ -26,7 +26,7 @@ export interface ForgejoIssue {
   created_at: string;
   updated_at: string;
   html_url: string;
-  /** Non nul quand l'« issue » est en réalité une pull request. */
+  /** Non-null when the "issue" is in fact a pull request. */
   pull_request?: unknown | null;
 }
 
@@ -38,7 +38,7 @@ export interface ForgejoComment {
   html_url: string;
 }
 
-/** Extrémité d'une pull request (branche source ou cible). */
+/** One end of a pull request (source or target branch). */
 export interface ForgejoPullRef {
   label: string;
   ref: string;
@@ -53,7 +53,7 @@ export interface ForgejoPullRequest {
   user?: ForgejoUser;
   head?: ForgejoPullRef;
   base?: ForgejoPullRef;
-  /** null tant que Forgejo n'a pas calculé la fusion. */
+  /** null until Forgejo has computed mergeability. */
   mergeable?: boolean | null;
   merged: boolean;
   draft?: boolean;

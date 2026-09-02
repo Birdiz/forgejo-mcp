@@ -1,29 +1,28 @@
-// Client HTTP de l'API Forgejo v1.
+// HTTP client for the Forgejo v1 API.
 //
-// Deux invariants de sécurité :
-//   1. L'URL de l'instance est fixée à la construction, jamais fournie par
-//      l'appelant → un modèle ne peut pas détourner le serveur vers un autre
-//      hôte (SSRF).
-//   2. Le token n'est jamais journalisé ni renvoyé dans un message d'erreur.
+// Two security invariants:
+//   1. The instance URL is fixed at construction time and never supplied by the
+//      caller, so a model cannot redirect the server at another host (SSRF).
+//   2. The token is never logged nor echoed back in an error message.
 
 import { REQUEST_TIMEOUT_MS } from "./constants.js";
 
-/** Erreur renvoyée par l'API, porteuse du statut HTTP pour un message actionnable. */
+/** API failure carrying the HTTP status, so callers can build actionable messages. */
 export class ForgejoApiError extends Error {
   constructor(
     readonly status: number,
     readonly detail: string,
     readonly path: string,
   ) {
-    super(`Forgejo a répondu ${status} sur ${path}`);
+    super(`Forgejo responded ${status} on ${path}`);
     this.name = "ForgejoApiError";
   }
 }
 
-/** Résultat d'un endpoint de liste, enrichi du total renvoyé par Forgejo. */
+/** Result of a list endpoint, enriched with the total Forgejo reports. */
 export interface ListResult<T> {
   items: T[];
-  /** Total côté serveur (en-tête X-Total-Count), sinon la taille de la page. */
+  /** Server-side total (X-Total-Count header), falling back to the page size. */
   total: number;
 }
 
@@ -36,12 +35,12 @@ interface RequestOptions {
   accept?: string;
 }
 
-/** Encode chaque segment d'un chemin : neutralise `..` et les slashs injectés. */
+/** Encodes each path segment, neutralising `..` and injected slashes. */
 export function encodePath(...segments: string[]): string {
   return segments.map((s) => encodeURIComponent(s)).join("/");
 }
 
-/** Encode un chemin de fichier segment par segment, en gardant les `/` réels. */
+/** Encodes a file path segment by segment, preserving genuine `/` separators. */
 export function encodeFilePath(filePath: string): string {
   return filePath
     .split("/")
@@ -70,7 +69,7 @@ export class ForgejoClient {
       response = await fetch(url, {
         method: options.method ?? "GET",
         headers: {
-          // Schéma d'authentification propre à Forgejo/Gitea.
+          // Authentication scheme specific to Forgejo/Gitea.
           Authorization: `token ${this.#token}`,
           Accept: options.accept ?? "application/json",
           ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
@@ -79,11 +78,11 @@ export class ForgejoClient {
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch (cause) {
-      // AbortSignal.timeout lève une TimeoutError : on la nomme explicitement,
-      // sinon elle ressort en « fetch failed » et n'aide personne.
+      // AbortSignal.timeout raises a TimeoutError: name it explicitly, otherwise
+      // it surfaces as a bare "fetch failed" that helps nobody.
       const isTimeout = cause instanceof Error && cause.name === "TimeoutError";
       const reason = isTimeout
-        ? `délai de ${REQUEST_TIMEOUT_MS / 1000} s dépassé`
+        ? `timed out after ${REQUEST_TIMEOUT_MS / 1000}s`
         : cause instanceof Error
           ? cause.message
           : String(cause);
@@ -110,7 +109,7 @@ export class ForgejoClient {
     return { items, total: Number.isFinite(parsed) ? parsed : items.length };
   }
 
-  /** Pour les endpoints qui renvoient du texte brut (diff, patch). */
+  /** For endpoints returning raw text (diff, patch). */
   async getText(path: string, query?: Record<string, QueryValue>): Promise<string> {
     const response = await this.#request(path, { query, accept: "text/plain" });
     return await response.text();
@@ -123,36 +122,36 @@ export class ForgejoClient {
 }
 
 /**
- * Traduit une erreur d'API en message qui dit à l'agent quoi faire ensuite.
- * Ne divulgue jamais le token ni la pile d'appel.
+ * Turns an API failure into a message that tells the agent what to do next.
+ * Never discloses the token or a stack trace.
  */
 export function describeError(error: unknown): string {
   if (error instanceof ForgejoApiError) {
-    const suffix = error.detail ? ` Détail Forgejo : ${error.detail}` : "";
+    const suffix = error.detail ? ` Forgejo said: ${error.detail}` : "";
     switch (error.status) {
       case 0:
-        return `Erreur : instance Forgejo injoignable (${error.detail}). Vérifier FORGEJO_URL et la connectivité réseau.`;
+        return `Error: Forgejo instance unreachable (${error.detail}). Check FORGEJO_URL and network connectivity.`;
       case 401:
-        return "Erreur : token refusé (401). Il est absent, expiré ou révoqué — en régénérer un sur /user/settings/applications.";
+        return "Error: token rejected (401). It is missing, expired or revoked — issue a new one at /user/settings/applications.";
       case 403: {
-        // Le scope attendu dépend de la famille d'endpoint : un message
-        // générique envoie chercher au mauvais endroit.
+        // The expected scope depends on the endpoint family: a generic message
+        // sends the reader looking in the wrong place.
         const scope = error.path.startsWith("/user")
-          ? "'read:user' (endpoints /user, dont whoami et la liste des dépôts)"
-          : "'write:issue' pour les issues, 'write:repository' pour les pull requests et la lecture du dépôt";
-        return `Erreur : accès refusé (403). Scope manquant sur le token : ${scope}. À ajuster sur /user/settings/applications — un token existant ne peut pas être élargi, il faut en créer un nouveau.${suffix}`;
+          ? "'read:user' (the /user endpoints, including whoami and the repository list)"
+          : "'write:issue' for issues, 'write:repository' for pull requests and repository reads";
+        return `Error: forbidden (403). Missing token scope: ${scope}. Adjust it at /user/settings/applications — an existing token cannot be widened, a new one is required.${suffix}`;
       }
       case 404:
-        return `Erreur : ressource introuvable (404). Vérifier owner/repo et le numéro. Un dépôt privé auquel le token n'a pas accès renvoie aussi 404.${suffix}`;
+        return `Error: not found (404). Check owner/repo and the number. A private repository the token cannot reach also answers 404.${suffix}`;
       case 409:
-        return `Erreur : conflit (409). Typiquement une pull request déjà ouverte pour ce couple de branches, ou des branches identiques.${suffix}`;
+        return `Error: conflict (409). Typically a pull request already open for this branch pair, or identical branches.${suffix}`;
       case 422:
-        return `Erreur : requête refusée par Forgejo (422). Champ invalide ou branche inexistante.${suffix}`;
+        return `Error: rejected by Forgejo (422). Invalid field or non-existent branch.${suffix}`;
       case 429:
-        return "Erreur : quota de requêtes dépassé (429). Attendre avant de réessayer.";
+        return "Error: rate limit exceeded (429). Wait before retrying.";
       default:
-        return `Erreur : l'API Forgejo a répondu ${error.status}.${suffix}`;
+        return `Error: the Forgejo API responded ${error.status}.${suffix}`;
     }
   }
-  return `Erreur inattendue : ${error instanceof Error ? error.message : String(error)}`;
+  return `Unexpected error: ${error instanceof Error ? error.message : String(error)}`;
 }

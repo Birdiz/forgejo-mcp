@@ -1,7 +1,7 @@
-// Mise en forme des réponses d'outils : pagination, troncature et rendu.
+// Tool response shaping: pagination, truncation and rendering.
 //
-// Deux formats sont supportés partout : 'markdown' (lisible, par défaut) et
-// 'json' (complet, pour un traitement programmatique).
+// Every tool supports two formats: 'markdown' (readable, default) and 'json'
+// (complete, for programmatic processing).
 
 import { CHARACTER_LIMIT } from "./constants.js";
 import type {
@@ -20,27 +20,27 @@ export interface ToolResult {
   content: { type: "text"; text: string }[];
   structuredContent?: Record<string, unknown>;
   isError?: boolean;
-  /** Le SDK exige une signature d'index sur le résultat d'un outil. */
+  /** The SDK requires an index signature on a tool result. */
   [key: string]: unknown;
 }
 
-/** Réponse d'erreur : pas de structuredContent, l'agent lit le texte. */
+/** Error response: no structuredContent, the agent reads the text. */
 export function errorResult(message: string): ToolResult {
   return { content: [{ type: "text", text: message }], isError: true };
 }
 
-/** Réduit un texte multiligne à une ligne bornée, pour les vues liste. */
+/** Collapses multi-line text to a single bounded line, for list views. */
 export function oneLine(text: string | undefined | null, max = 120): string {
   if (!text) return "";
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
-/** Coupe un gros bloc (diff, contenu de fichier) en annonçant la coupe. */
+/** Cuts a large blob (diff, file contents) while announcing the cut. */
 export function truncateBlob(blob: string, max: number): { text: string; truncated: boolean } {
   if (blob.length <= max) return { text: blob, truncated: false };
   return {
-    text: `${blob.slice(0, max)}\n\n[…tronqué : ${blob.length - max} caractères de plus]`,
+    text: `${blob.slice(0, max)}\n\n[…truncated: ${blob.length - max} more characters]`,
     truncated: true,
   };
 }
@@ -51,8 +51,8 @@ interface ListRender {
 }
 
 /**
- * Construit une réponse de liste en respectant CHARACTER_LIMIT : tant que le
- * rendu dépasse, on divise le nombre d'éléments par deux et on le signale.
+ * Builds a list response that respects CHARACTER_LIMIT: while the rendering is
+ * too large, halve the number of items and report that it happened.
  */
 export function listResult<T>(params: {
   format: ResponseFormat;
@@ -79,7 +79,7 @@ export function listResult<T>(params: {
       ...(truncated
         ? {
             truncated: true,
-            truncation_message: `Réponse réduite de ${returned} à ${items.length} éléments pour tenir dans la limite de contexte. Baisser 'limit' ou affiner les filtres.`,
+            truncation_message: `Response reduced from ${returned} to ${items.length} items to fit the context limit. Lower 'limit' or narrow the filters.`,
           }
         : {}),
     };
@@ -93,7 +93,7 @@ export function listResult<T>(params: {
   }
 }
 
-/** Réponse pour une ressource unique (issue, PR, fichier…). */
+/** Response for a single resource (issue, PR, file…). */
 export function singleResult(params: {
   format: ResponseFormat;
   structured: Record<string, unknown>;
@@ -105,7 +105,7 @@ export function singleResult(params: {
   return { content: [{ type: "text", text: bounded }], structuredContent: params.structured };
 }
 
-// --- Rendus markdown -------------------------------------------------------
+// --- Markdown rendering ----------------------------------------------------
 
 export function labelNames(issue: ForgejoIssue): string[] {
   return (issue.labels ?? []).map((label) => label.name);
@@ -114,7 +114,7 @@ export function labelNames(issue: ForgejoIssue): string[] {
 export function issueLine(issue: ForgejoIssue): string {
   const labels = labelNames(issue);
   const suffix = labels.length > 0 ? ` [${labels.join(", ")}]` : "";
-  return `- **#${issue.number}** ${issue.title} — *${issue.state}*, par ${issue.user?.login ?? "?"}, ${issue.comments} commentaire(s)${suffix}`;
+  return `- **#${issue.number}** ${issue.title} — *${issue.state}*, by ${issue.user?.login ?? "?"}, ${issue.comments} comment(s)${suffix}`;
 }
 
 export function issueDetail(issue: ForgejoIssue, comments: ForgejoComment[] | null): string {
@@ -122,23 +122,23 @@ export function issueDetail(issue: ForgejoIssue, comments: ForgejoComment[] | nu
   const lines = [
     `# #${issue.number} — ${issue.title}`,
     "",
-    `- **État** : ${issue.state}`,
-    `- **Auteur** : ${issue.user?.login ?? "?"}`,
-    `- **Créée le** : ${issue.created_at}`,
-    `- **Mise à jour** : ${issue.updated_at}`,
-    ...(labels.length > 0 ? [`- **Étiquettes** : ${labels.join(", ")}`] : []),
+    `- **State**: ${issue.state}`,
+    `- **Author**: ${issue.user?.login ?? "?"}`,
+    `- **Created**: ${issue.created_at}`,
+    `- **Updated**: ${issue.updated_at}`,
+    ...(labels.length > 0 ? [`- **Labels**: ${labels.join(", ")}`] : []),
     ...((issue.assignees ?? []).length > 0
-      ? [`- **Assignée à** : ${(issue.assignees ?? []).map((u) => u.login).join(", ")}`]
+      ? [`- **Assignees**: ${(issue.assignees ?? []).map((u) => u.login).join(", ")}`]
       : []),
-    `- **URL** : ${issue.html_url}`,
+    `- **URL**: ${issue.html_url}`,
     "",
     "## Description",
     "",
-    issue.body?.trim() ? issue.body : "*(vide)*",
+    issue.body?.trim() ? issue.body : "*(empty)*",
   ];
   if (comments !== null) {
-    lines.push("", `## Commentaires (${comments.length})`, "");
-    if (comments.length === 0) lines.push("*(aucun)*");
+    lines.push("", `## Comments (${comments.length})`, "");
+    if (comments.length === 0) lines.push("*(none)*");
     for (const comment of comments) {
       lines.push(`### ${comment.user?.login ?? "?"} — ${comment.created_at}`, "", comment.body, "");
     }
@@ -147,33 +147,33 @@ export function issueDetail(issue: ForgejoIssue, comments: ForgejoComment[] | nu
 }
 
 export function pullLine(pull: ForgejoPullRequest): string {
-  const state = pull.merged ? "fusionnée" : pull.state;
-  const draft = pull.draft ? " (brouillon)" : "";
-  return `- **#${pull.number}** ${pull.title} — *${state}*${draft}, ${pull.head?.ref ?? "?"} → ${pull.base?.ref ?? "?"}, par ${pull.user?.login ?? "?"}`;
+  const state = pull.merged ? "merged" : pull.state;
+  const draft = pull.draft ? " (draft)" : "";
+  return `- **#${pull.number}** ${pull.title} — *${state}*${draft}, ${pull.head?.ref ?? "?"} → ${pull.base?.ref ?? "?"}, by ${pull.user?.login ?? "?"}`;
 }
 
 export function pullDetail(pull: ForgejoPullRequest, diff: string | null): string {
   const mergeable =
     pull.mergeable === undefined || pull.mergeable === null
-      ? "non calculé"
+      ? "not computed"
       : pull.mergeable
-        ? "oui"
-        : "non (conflits)";
+        ? "yes"
+        : "no (conflicts)";
   const lines = [
     `# PR #${pull.number} — ${pull.title}`,
     "",
-    `- **État** : ${pull.merged ? "fusionnée" : pull.state}${pull.draft ? " (brouillon)" : ""}`,
-    `- **Branches** : ${pull.head?.ref ?? "?"} → ${pull.base?.ref ?? "?"}`,
-    `- **Auteur** : ${pull.user?.login ?? "?"}`,
-    `- **Fusionnable** : ${mergeable}`,
+    `- **State**: ${pull.merged ? "merged" : pull.state}${pull.draft ? " (draft)" : ""}`,
+    `- **Branches**: ${pull.head?.ref ?? "?"} → ${pull.base?.ref ?? "?"}`,
+    `- **Author**: ${pull.user?.login ?? "?"}`,
+    `- **Mergeable**: ${mergeable}`,
     ...(pull.changed_files !== undefined
-      ? [`- **Diff** : ${pull.changed_files} fichier(s), +${pull.additions ?? 0} / -${pull.deletions ?? 0}`]
+      ? [`- **Diff**: ${pull.changed_files} file(s), +${pull.additions ?? 0} / -${pull.deletions ?? 0}`]
       : []),
-    `- **URL** : ${pull.html_url}`,
+    `- **URL**: ${pull.html_url}`,
     "",
     "## Description",
     "",
-    pull.body?.trim() ? pull.body : "*(vide)*",
+    pull.body?.trim() ? pull.body : "*(empty)*",
   ];
   if (diff !== null) lines.push("", "## Diff", "", "```diff", diff, "```");
   return lines.join("\n");
@@ -191,7 +191,7 @@ export function commitLine(commit: ForgejoCommit): string {
 }
 
 export function repoLine(repo: ForgejoRepo): string {
-  const visibility = repo.private ? "privé" : "public";
+  const visibility = repo.private ? "private" : "public";
   const description = repo.description ? ` — ${oneLine(repo.description, 80)}` : "";
-  return `- **${repo.full_name}** (${visibility}, défaut: ${repo.default_branch})${description}`;
+  return `- **${repo.full_name}** (${visibility}, default: ${repo.default_branch})${description}`;
 }

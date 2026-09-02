@@ -2,7 +2,7 @@
   "name": "forgejo-mcp-server",
   "version": "1.0.0",
   "private": true,
-  "description": "Serveur MCP pour Forgejo : issues, pull requests et lecture de dépôt. Sans autorité propre — le token est fourni par l'appelant.",
+  "description": "MCP server for Forgejo: issues, pull requests and repository reads. Holds no authority of its own \u2014 the token comes from the caller.",
   "type": "module",
   "main": "dist/index.js",
   "engines": {
