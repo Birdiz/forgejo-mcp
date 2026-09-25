@@ -140,6 +140,7 @@ async function resolveLabelIds(
   slug: string,
   names: string[],
 ): Promise<{ ids: number[]; unresolved: string[] }> {
+  if (names.length === 0) return { ids: [], unresolved: [] };
   const { items } = await client.getList<ForgejoLabel>(`/repos/${slug}/labels`, {
     limit: MAX_PAGE_SIZE,
   });
@@ -518,16 +519,17 @@ Parameters:
   - state ('open' | 'closed', optional): closes or reopens the issue
   - title (string, optional): replaces the current title
   - body (string, optional): replaces the current body — this overwrites, it does not append
-  - labels (string[], optional): replaces the full label set; unknown names are skipped and reported
+  - labels (string[], optional): replaces the full label set; unknown names are skipped and reported; [] removes every label
   - assignees (string[], optional): replaces the full assignee list
 
 At least one changing field is required; omitted fields are left untouched.
 
-Returns: { number, title, state, labels, assignees, html_url, unresolved_labels }
+Returns: { number, title, state, labels, assignees, html_url, unresolved_labels } — labels is the set actually applied.
 
 Examples:
   - "close issue 42" -> number=42, state='closed'
   - "reopen it and retitle it" -> number=42, state='open', title='…'
+  - "tag 42 as a bug, drop the rest" -> number=42, labels=['bug']
 
 To add to a discussion without altering the issue, use forgejo_comment_issue instead.
 Also accepts a pull request number, but only its issue-side fields change — it cannot merge or close a PR's branch.`,
@@ -540,7 +542,10 @@ Also accepts a pull request number, but only its issue-side fields change — it
           .describe("New state: 'closed' closes the issue, 'open' reopens it."),
         title: z.string().min(1).max(255).optional().describe("Replacement title."),
         body: z.string().max(65_535).optional().describe("Replacement body (overwrites, no append)."),
-        labels: z.array(z.string()).optional().describe("Replacement label set, by name."),
+        labels: z
+          .array(z.string())
+          .optional()
+          .describe("Replacement label set, by name. [] removes every label."),
         assignees: z.array(z.string()).optional().describe("Replacement assignee list, by login."),
         ...formatShape,
       },
@@ -559,30 +564,40 @@ Also accepts a pull request number, but only its issue-side fields change — it
     }) =>
       run(async () => {
         const { slug } = resolveRepo(params, defaults);
+        const path = `/repos/${slug}/issues/${params.number}`;
 
+        // EditIssueOption has no labels field: Forgejo silently drops one sent
+        // in the PATCH, so the label set goes through its own endpoint below.
         const patch: Record<string, unknown> = {};
         if (params.state !== undefined) patch.state = params.state;
         if (params.title !== undefined) patch.title = params.title;
         if (params.body !== undefined) patch.body = params.body;
         if (params.assignees !== undefined) patch.assignees = params.assignees;
+        const hasPatch = Object.keys(patch).length > 0;
 
-        let unresolved: string[] = [];
-        if (params.labels !== undefined) {
-          const resolved = await resolveLabelIds(client, slug, params.labels);
-          unresolved = resolved.unresolved;
-          patch.labels = resolved.ids;
-        }
-
-        if (Object.keys(patch).length === 0) {
+        if (!hasPatch && params.labels === undefined) {
           throw new UsageError(
             "Error: nothing to update. Provide at least one of: state, title, body, labels, assignees.",
           );
         }
 
-        const issue = await client.patch<ForgejoIssue>(
-          `/repos/${slug}/issues/${params.number}`,
-          patch,
-        );
+        let labelIds: number[] | undefined;
+        let unresolved: string[] = [];
+        if (params.labels !== undefined) {
+          ({ ids: labelIds, unresolved } = await resolveLabelIds(client, slug, params.labels));
+        }
+
+        let issue = hasPatch
+          ? await client.patch<ForgejoIssue>(path, patch)
+          : await client.get<ForgejoIssue>(path);
+        if (labelIds !== undefined) {
+          // The PUT answers with the resulting label set, which the issue read
+          // above predates.
+          const labels = await client.put<ForgejoLabel[]>(`${path}/labels`, { labels: labelIds });
+          issue = { ...issue, labels };
+        }
+
+        const labels = labelNames(issue);
         const warning =
           unresolved.length > 0
             ? `\n\n⚠️ Unknown labels, skipped: ${unresolved.join(", ")}.`
@@ -593,12 +608,12 @@ Also accepts a pull request number, but only its issue-side fields change — it
             number: issue.number,
             title: issue.title,
             state: issue.state,
-            labels: labelNames(issue),
+            labels,
             assignees: (issue.assignees ?? []).map((user) => user.login),
             html_url: issue.html_url,
             unresolved_labels: unresolved,
           },
-          markdown: `Issue **#${issue.number}** updated — state: ${issue.state}, title: ${issue.title}\n\n${issue.html_url}${warning}`,
+          markdown: `Issue **#${issue.number}** updated — state: ${issue.state}, title: ${issue.title}, labels: ${labels.length > 0 ? labels.join(", ") : "none"}\n\n${issue.html_url}${warning}`,
         });
       }),
   );
