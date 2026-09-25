@@ -120,7 +120,8 @@ token grants nothing. `/healthz` only reports the instance URL and the version.
 
 ```bash
 pnpm dev        # tsc --watch
-pnpm typecheck
+pnpm typecheck  # sources and tests
+pnpm test       # node:test, against a fake Forgejo client
 pnpm start      # node dist/index.js
 ```
 
