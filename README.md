@@ -64,6 +64,7 @@ An existing token cannot be widened: adding a scope means issuing a new one.
 | `forgejo_create_pull_request` | **write** | open a PR between two branches |
 | `forgejo_list_branches` | read | branches and protection |
 | `forgejo_list_commits` | read | a branch's history |
+| `forgejo_get_commit_status` | read | CI status of a commit, job by job |
 | `forgejo_get_file` | read | file or directory at a revision |
 
 All of them accept `response_format` (`markdown` by default, `json` for raw

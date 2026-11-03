@@ -33,6 +33,7 @@ import {
 } from "./format.js";
 import type {
   ForgejoBranch,
+  ForgejoCombinedStatus,
   ForgejoComment,
   ForgejoCommit,
   ForgejoFileContent,
@@ -918,6 +919,60 @@ Examples:
               ...shown.map(commitLine),
             ].join("\n"),
           }),
+        });
+      }),
+  );
+
+  server.registerTool(
+    "forgejo_get_commit_status",
+    {
+      title: "Commit CI status",
+      description: `Returns the CI status of a commit: the combined state and one entry per job.
+
+Parameters: owner, repo, ref (required: branch name or SHA), response_format.
+
+Returns: { sha, state, total_count, statuses: [{ context, status, description, target_url, updated_at }] }
+
+state only covers the jobs reported so far: to confirm that CI finished, check that the job you expect appears in statuses.
+An empty state with total_count 0 means no job has reported: either CI has not started or the ref does not exist, Forgejo answers the same for both.`,
+      inputSchema: {
+        ...repoShape,
+        ref: z.string().min(1).describe("Branch name or commit SHA."),
+        ...formatShape,
+      },
+      annotations: readOnly,
+    },
+    async (params: {
+      owner?: string;
+      repo?: string;
+      ref: string;
+      response_format: ResponseFormat;
+    }) =>
+      run(async () => {
+        const { slug } = resolveRepo(params, defaults);
+        const combined = await client.get<ForgejoCombinedStatus>(
+          `/repos/${slug}/commits/${encodeFilePath(params.ref)}/status`,
+        );
+        const statuses = combined.statuses ?? [];
+        return singleResult({
+          format: params.response_format,
+          structured: {
+            sha: combined.sha,
+            state: combined.state,
+            total_count: combined.total_count,
+            statuses: statuses.map((status) => ({
+              context: status.context,
+              status: status.status,
+              description: status.description ?? null,
+              target_url: status.target_url ?? null,
+              updated_at: status.updated_at ?? null,
+            })),
+          },
+          markdown: [
+            `# CI status of ${params.ref}: ${combined.state || "no job reported"}`,
+            "",
+            ...statuses.map((status) => `- ${status.status} — ${status.context} (${oneLine(status.description)})`),
+          ].join("\n"),
         });
       }),
   );
