@@ -102,3 +102,18 @@ export interface ForgejoFileContent {
   content?: string;
   html_url?: string;
 }
+
+export interface ForgejoCommitStatus {
+  context: string;
+  status: string;
+  description?: string;
+  target_url?: string;
+  updated_at?: string;
+}
+
+export interface ForgejoCombinedStatus {
+  sha: string;
+  state: string;
+  total_count: number;
+  statuses: ForgejoCommitStatus[] | null;
+}
